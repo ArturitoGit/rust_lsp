@@ -36,7 +36,7 @@ fn find_current_class<'tree>(node: Node<'tree>, pos: &Point, src_bytes: &[u8]) -
   value: (call_expression
     function: (member_expression) @ext_extend (#eq? @ext_extend \"Ext.extend\")
     arguments: (arguments
-        . (member_expression) @ext_parent
+        . (_) @ext_parent
         . (object) @ext_body
     )
   )
