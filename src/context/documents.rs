@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{RwLock};
 use std::fs::File;
 use std::io::{Read, BufReader};
 use tower_lsp::lsp_types::Url;
@@ -23,13 +23,13 @@ pub struct Document {
 
 #[derive(Debug)]
 pub struct Documents {
-    documents: Arc<RwLock<HashMap<Url, String>>>
+    documents: RwLock<HashMap<Url, String>>
 }
 
 impl Documents {
     pub fn new() -> Self {
         Self {
-            documents: Arc::new(RwLock::new(HashMap::new()))
+            documents: RwLock::new(HashMap::new())
         }
     }
 
