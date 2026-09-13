@@ -1,13 +1,15 @@
 mod documents;
-mod goto_method;
+mod context;
+mod find_file;
+mod features;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use tree_sitter::Point;
 
-use goto_method::go_to_method;
 use documents::Documents;
+use context::context_for;
+use features::definition::goto_definition;
 
 #[derive(Debug)]
 struct Backend {
@@ -48,31 +50,13 @@ impl LanguageServer for Backend {
     }
     
     async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
-        let uri = params.text_document_position_params.text_document.uri;
-        let position = params.text_document_position_params.position;
-
-        let document = self.documents.get(&uri)
-            .expect("Failed to find the document in saved documents");
-
-        // Use tree sitter to find the definition
-        let result = go_to_method(&document, to_point(&position));
-        let Some(point) = result else {
-            self.client
-                .log_message(MessageType::INFO, "Could not find definition :(")
-                .await;
-            return Ok(None);
-        };
-
-        // Build response
-        let response = GotoDefinitionResponse::Scalar(Location {
-            uri: uri,
-            range: Range {
-                start: to_position(&point),
-                end: to_position(&point)
+        match goto_definition(params, &context_for(&self.documents)) {
+            Ok(res) => Ok(res),
+            Err(err) => {
+                self.client.log_message(MessageType::ERROR, &err.message).await;
+                Err(err)
             }
-        });
-
-        Ok(Some(response))
+        }
     }
     
     async fn did_open(&self, params: DidOpenTextDocumentParams) -> () {
@@ -95,14 +79,6 @@ impl LanguageServer for Backend {
         let first_change = changes.into_iter().next().unwrap();
         self.documents.set(uri, first_change.text);
     }
-}
-
-fn to_point(position: &Position) -> Point {
-    Point::new(position.line as usize, position.character as usize)
-}
-
-fn to_position(point: &Point) -> Position {
-    Position::new(point.row as u32, point.column as u32)
 }
 
 #[tokio::main]

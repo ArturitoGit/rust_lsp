@@ -8,6 +8,11 @@ pub struct Documents {
     documents: Arc<RwLock<HashMap<Url, String>>>
 }
 
+pub struct Document {
+    pub url: Url,
+    pub text: String // TODO : Make it a reference to the internal state
+}
+
 impl Documents {
     pub fn new() -> Self {
         Self {
@@ -15,14 +20,13 @@ impl Documents {
         }
     }
 
-    pub fn get(&self, url: &Url) -> Option<String> {
+    pub fn get(&self, url: &Url) -> Option<Document> {
         self.documents.read().unwrap()
             .get(url)
-            .map(|it| it.to_string())
+            .map(|text| Document { url: url.clone(), text: text.to_string() })
     }
 
     pub fn set(&self, url: Url, text: String) {
-        self.documents.write().unwrap()
-            .insert(url, text);
+        self.documents.write().unwrap().insert(url, text);
     }
 }
