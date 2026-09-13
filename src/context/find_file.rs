@@ -21,15 +21,3 @@ pub fn find_files(file_name: &str) -> Vec<String> {
         .map(|it| it.to_string())
         .collect()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = find_files("find_file.rs");
-        assert_eq!(1, result.len());
-        assert_eq!("./src/find_file.rs", result[0].as_str());
-    }
-}

@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 
-use crate::documents::Document;
-use crate::context::Context;
+use crate::context::documents::{Context, Document};
 
 use tree_sitter::{Parser, Query, Point, QueryCursor, StreamingIterator, Node, Language, Tree};
 use tower_lsp::lsp_types::{GotoDefinitionParams, GotoDefinitionResponse, Position, Location, Range, Url};
@@ -15,7 +14,7 @@ pub fn goto_definition(params: GotoDefinitionParams, context: &impl Context) -> 
 
     // Find document in memory
     let document = context.get_document(&uri)
-        .ok_or(error("Failed to find the document in saved documents"))?;
+        .map_err(|msg| error(&msg))?;
 
     // Parse the document js content
     let tree = parse_js(&document.text);
@@ -323,22 +322,24 @@ const MyClass = Ext.extend(MyParent, {
     }
 
     impl Context for TestContext {
-        fn get_document(&self, url: &Url) -> Option<Document> {
+        fn get_document(&self, url: &Url) -> std::result::Result<Document, String> {
             self.documents.iter()
                 .find(|(doc_url, _)| doc_url == url)
                 .map(|(doc_url, content)| Document {
                     url: doc_url.clone(),
                     text: content.to_string()
                 })
+                .ok_or(format!("Failed to find test document : {}", url))
         }
-        fn find_file(&self, name: &str) -> Vec<Document> {
-            self.findable_files.iter()
+        fn find_file(&self, name: &str) -> std::result::Result<Vec<Document>, String> {
+            Ok(self.findable_files.iter()
                 .filter(|(_, file_name, _)| *file_name == name)
                 .map(|(url, _, content)| Document {
                     url: url.clone(),
                     text: content.to_string()
                 })
                 .collect()
+            )
         }
     }
 

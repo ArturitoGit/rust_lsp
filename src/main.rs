@@ -1,14 +1,11 @@
-mod documents;
 mod context;
-mod find_file;
 mod features;
 
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use documents::Documents;
-use context::context_for;
+use context::documents::{Documents};
 use features::definition::goto_definition;
 
 #[derive(Debug)]
@@ -50,7 +47,7 @@ impl LanguageServer for Backend {
     }
     
     async fn goto_definition(&self, params: GotoDefinitionParams) -> Result<Option<GotoDefinitionResponse>> {
-        match goto_definition(params, &context_for(&self.documents)) {
+        match goto_definition(params, &self.documents) {
             Ok(res) => Ok(res),
             Err(err) => {
                 self.client.log_message(MessageType::ERROR, &err.message).await;
@@ -64,7 +61,7 @@ impl LanguageServer for Backend {
         let text = params.text_document.text;
 
         // Save the document in the memory
-        self.documents.set(uri, text);
+        self.documents.on_document_change(uri, text);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) -> () {
@@ -77,7 +74,7 @@ impl LanguageServer for Backend {
         
         // Save the document in the memory
         let first_change = changes.into_iter().next().unwrap();
-        self.documents.set(uri, first_change.text);
+        self.documents.on_document_change(uri, first_change.text);
     }
 }
 
