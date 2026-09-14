@@ -88,6 +88,11 @@ impl<'tree> ExtClass<'tree> {
 
 fn find_classes<'tree>(node: Node<'tree>, document: &Document) -> Vec<ExtClass<'tree>> {
     let bytes = document.text.as_bytes();
+
+    let mut result = Vec::new(); // Collect the result in a vector because ownership cannot be taken
+                                 // from a StreamingIterator
+
+    // const MyClass = Ext.extend(Ext.ux.Counter, { ...
     let query = "\
 (lexical_declaration (variable_declarator
   name: (identifier) @ext_class
@@ -101,11 +106,27 @@ fn find_classes<'tree>(node: Node<'tree>, document: &Document) -> Vec<ExtClass<'
 ))
 ";
     let query = Query::new(&js_language(), query).expect("Failed to parse query");
-
-    let mut result = Vec::new(); // Collect the result in a vector because ownership cannot be taken
-                                 // from a StreamingIterator
     let mut cursor = QueryCursor::new();
-    cursor.matches(&query, node, bytes)
+    let matches = cursor.matches(&query, node, bytes);
+
+    // Ext.ux.MyClass = Ext.extend(Ext.ux.Counter, { ...
+    let query2 = "\
+(expression_statement (assignment_expression
+  left: (_) @ext_class
+  right: (call_expression
+    function: (member_expression) @ext_extend (#eq? @ext_extend \"Ext.extend\")
+    arguments: (arguments
+        . (_) @ext_parent
+        . (object) @ext_body
+    )
+  )
+))
+";
+    let query2 = Query::new(&js_language(), query2).expect("Failed to parse query");
+    let mut cursor2 = QueryCursor::new();
+    let matches2 = cursor2.matches(&query2, node, bytes);
+
+    matches.chain(matches2)
         .for_each(|match_class| {
             let name = match_class.nodes_for_capture_index(0)
                 .next().expect("Failed to capture class name")
@@ -313,6 +334,41 @@ const MyClass = Ext.extend(MyParent, {
         assert_eq!(
             Ok(Some(response(url("/here/MyClass.js"), &Point::new(3, 4)))),
             goto_definition(params("/here/MyClass.js", Position::new(8, 11)), &context)
+        );
+    }
+
+    #[test]
+    fn test_handles_dotted_names() {
+
+        let context = TestContext {
+            documents: vec![
+                (url("/here/MyClass.js"), "\
+const MyClass = Ext.extend(Ext.ux.MyParent, {
+    active: false,
+    width: 30,
+    test: function() {
+      this.width = 20;
+      this.enable()
+    }
+})"
+                )
+            ],
+            findable_files: vec![
+                (url("/parent/Ext.ux.MyParent.js"), "Ext.ux.MyParent", "\
+Ext.ux.MyParent = Ext.extend(com.lyra.Base, {
+    active: false,
+    width: 30,
+    enable: function() {
+        this.active = true;
+    }
+})"
+                )
+            ]
+        };
+
+        assert_eq!(
+            Ok(Some(response(url("/parent/Ext.ux.MyParent.js"), &Point::new(3, 4)))),
+            goto_definition(params("/here/MyClass.js", Position::new(5, 11)), &context)
         );
     }
 
