@@ -21,8 +21,9 @@ pub fn goto_definition(params: GotoDefinitionParams, context: &impl Context) -> 
 
     // Extract the searched method
     let point = to_point(&position);
-    let method_name = word_at_position(tree.root_node(), &point, document.text.as_bytes())
-        .ok_or(error("Could not find method reference under the cursor"))?;
+    let Some(method_name) = word_at_position(tree.root_node(), &point, document.text.as_bytes()) else {
+        return Ok(None)
+    };
 
     // Find the current class
     let class = find_classes(tree.root_node(), &document).into_iter()
@@ -68,10 +69,26 @@ fn parse_js(src: &str) -> Tree {
 }
 
 fn word_at_position(node: Node<'_>, pos: &Point, src_bytes: &[u8]) -> Option<String> {
-    let name = node.descendant_for_point_range(*pos, *pos)?
-        .utf8_text(src_bytes)
-        .expect("Failed to parse the word under cursor as UTF-8");
-    Some(name.to_string())
+    let descendant = node.descendant_for_point_range(*pos, *pos)?;
+
+    let previous_words = vec![
+        descendant.prev_sibling()?.prev_sibling()?,
+        descendant.prev_sibling()?
+    ]
+        .iter()
+        .map(|node| node.utf8_text(src_bytes))
+        .map(|text| text.expect("Failed to parse previous words as UTF-8"))
+        .collect::<Vec<_>>();
+
+    if previous_words != [ "this", "." ] {
+        return None;
+    }
+
+    let word = descendant.utf8_text(src_bytes)
+        .expect("Failed to parse the word under cursor as UTF-8")
+        .to_string();
+
+    Some(word)
 }
 
 struct ExtClass<'tree> {
@@ -369,6 +386,33 @@ Ext.ux.MyParent = Ext.extend(com.lyra.Base, {
         assert_eq!(
             Ok(Some(response(url("/parent/Ext.ux.MyParent.js"), &Point::new(3, 4)))),
             goto_definition(params("/here/MyClass.js", Position::new(5, 11)), &context)
+        );
+    }
+
+    #[test]
+    fn test_returns_none_without_this() {
+        let context = TestContext {
+            documents: vec![
+                (url("/here/MyClass.js"), "\
+const MyClass = Ext.extend(MyParent, {
+    active: false,
+    width: 30,
+    enable: function() {
+        this.active = true;
+    },
+    test: function() {
+      this.width = 20;
+      enable()
+    }
+})"
+                )
+            ],
+            findable_files: vec![]
+        };
+
+        assert_eq!(
+            Ok(None),
+            goto_definition(params("/here/MyClass.js", Position::new(8, 6)), &context)
         );
     }
 
