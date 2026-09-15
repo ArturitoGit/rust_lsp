@@ -1,10 +1,13 @@
 use std::process::Command;
 
-pub fn find_files(file_name: &str) -> Vec<String> {
+pub fn find_files(names: &[&str]) -> Vec<String> {
 
-    let name_with_suffix = format!("{file_name}.js");
+    let names_arg = names.iter()
+        .map(|name| format!("{name}.js"))
+        .collect::<Vec<_>>()
+        .join("|");
 
-    let output = Command::new("fd").args([ "-a", &name_with_suffix ])
+    let output = Command::new("fd").args([ "-a", &names_arg ])
         .output()
         .expect("Failed to execute find command");
 

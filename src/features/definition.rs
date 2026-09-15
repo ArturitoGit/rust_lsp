@@ -42,7 +42,7 @@ fn find_attribute(searched_attribute: &str, class: &ExtClass<'_>, document: &Doc
     }
 
     // Find parent
-    let parent = context.find_file(&class.parent)
+    let parent = context.find_file(&possible_filenames(&class.parent))
         .map_err(|err| error(&err))?
         .into_iter().next()
         .ok_or(error(&format!("Could not find definition for class : {}", &class.parent)))?;
@@ -187,6 +187,15 @@ fn find_attribute_in_class<'tree>(class: &ExtClass<'tree>, searched_attribute: &
         .copied()
 }
 
+fn possible_filenames(class_name: &str) -> Vec<&str> {
+    let parts = class_name.split(".").collect::<Vec<_>>();
+    if parts.len() == 1 {
+        return vec![class_name];
+    }
+
+    vec![class_name, parts.last().unwrap()]
+}
+
 fn response(uri: Url, point: &Point) -> GotoDefinitionResponse {
     GotoDefinitionResponse::Scalar(Location {
         uri,
@@ -238,9 +247,9 @@ mod tests {
                 })
                 .ok_or(format!("Failed to find test document : {}", url))
         }
-        fn find_file(&self, name: &str) -> std::result::Result<Vec<Document>, String> {
+        fn find_file(&self, names: &[&str]) -> std::result::Result<Vec<Document>, String> {
             Ok(self.findable_files.iter()
-                .filter(|(_, file_name, _)| *file_name == name)
+                .filter(|(_, file_name, _)| names.iter().any(|name| name == file_name))
                 .map(|(url, _, content)| Document {
                     url: url.clone(),
                     text: content.to_string()
@@ -429,6 +438,41 @@ Ext.ux.MyParent = Ext.extend(com.lyra.Base, {
 
         assert_eq!(
             Ok(Some(response(url("/parent/Ext.ux.MyParent.js"), &Point::new(3, 4)))),
+            goto_definition(params("/here/MyClass.js", Position::new(5, 11)), &context)
+        );
+    }
+
+    #[test]
+    fn test_looks_for_dotted_name_last_part() {
+
+        let context = TestContext {
+            documents: vec![
+                (url("/here/MyClass.js"), "\
+const MyClass = Ext.extend(Ext.ux.MyParent, {
+    active: false,
+    width: 30,
+    test: function() {
+      this.width = 20;
+      this.enable()
+    }
+})"
+                )
+            ],
+            findable_files: vec![
+                (url("/parent/MyParent.js"), "MyParent", "\
+Ext.ux.MyParent = Ext.extend(com.lyra.Base, {
+    active: false,
+    width: 30,
+    enable: function() {
+        this.active = true;
+    }
+})"
+                )
+            ]
+        };
+
+        assert_eq!(
+            Ok(Some(response(url("/parent/MyParent.js"), &Point::new(3, 4)))),
             goto_definition(params("/here/MyClass.js", Position::new(5, 11)), &context)
         );
     }

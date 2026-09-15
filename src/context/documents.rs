@@ -13,7 +13,7 @@ pub trait Context {
 
     // Find a document by its file name.
     // Open & save it in memory if needed.
-    fn find_file(&self, name: &str) -> Result<Vec<Document>, String>;
+    fn find_file(&self, names: &[&str]) -> Result<Vec<Document>, String>;
 }
 
 pub struct Document {
@@ -57,9 +57,9 @@ impl Context for Documents {
         Ok(Document { url: url.clone(), text })
     }
 
-    fn find_file(&self, name: &str) -> Result<Vec<Document>, String> {
+    fn find_file(&self, names: &[&str]) -> Result<Vec<Document>, String> {
         let mut res = Vec::new();
-        for path in find_files(name).into_iter() {
+        for path in find_files(names).into_iter() {
             let url = url_from(&path)?;
             let doc = self.get_document(&url)?;
             res.push(doc);
