@@ -19,9 +19,9 @@ pub fn goto_definition(params: GotoDefinitionParams, context: &impl Context) -> 
     // Parse the document js content
     let tree = parse_js(&document.text);
 
-    // Extract the searched method
+    // Extract the searched attribute
     let point = to_point(&position);
-    let Some(method_name) = word_at_position(tree.root_node(), &point, document.text.as_bytes()) else {
+    let Some(attribute_name) = ref_at_position(tree.root_node(), &point, document.text.as_bytes()) else {
         return Ok(None)
     };
 
@@ -30,15 +30,15 @@ pub fn goto_definition(params: GotoDefinitionParams, context: &impl Context) -> 
         .find(|c| c.contains(&point))
         .ok_or(error("Could not find extjs class around the cursor"))?;
 
-    find_method(&method_name, &class, &document, context)
+    find_attribute(&attribute_name, &class, &document, context)
 }
 
-fn find_method(searched_method: &str, class: &ExtClass<'_>, document: &Document, context: &impl Context) -> Result<Option<GotoDefinitionResponse>> {
+fn find_attribute(searched_attribute: &str, class: &ExtClass<'_>, document: &Document, context: &impl Context) -> Result<Option<GotoDefinitionResponse>> {
 
     // Search in local class
-    let local_method = find_method_in_class(class, searched_method, document.text.as_bytes());
-    if let Some(method) = local_method {
-        return Ok(Some(response(document.url.clone(), &method.start_position())));
+    let local_attribute = find_attribute_in_class(class, searched_attribute, document.text.as_bytes());
+    if let Some(attribute) = local_attribute {
+        return Ok(Some(response(document.url.clone(), &attribute.start_position())));
     }
 
     // Find parent
@@ -55,7 +55,7 @@ fn find_method(searched_method: &str, class: &ExtClass<'_>, document: &Document,
         .find(|c| c.name == class.parent)
         .ok_or(error("Could not find class in parent file"))?;
 
-    return find_method(searched_method, &parent_class, &parent, context)
+    return find_attribute(searched_attribute, &parent_class, &parent, context)
 }
 
 fn js_language() -> Language {
@@ -68,7 +68,7 @@ fn parse_js(src: &str) -> Tree {
     parser.parse(src, None).expect("Failed to parse the source code")
 }
 
-fn word_at_position(node: Node<'_>, pos: &Point, src_bytes: &[u8]) -> Option<String> {
+fn ref_at_position(node: Node<'_>, pos: &Point, src_bytes: &[u8]) -> Option<String> {
     let descendant = node.descendant_for_point_range(*pos, *pos)?;
 
     let previous_words = vec![
@@ -164,26 +164,26 @@ fn find_classes<'tree>(node: Node<'tree>, document: &Document) -> Vec<ExtClass<'
     result
 }
 
-fn find_method_in_class<'tree>(class: &ExtClass<'tree>, searched_method: &str, bytes: &[u8]) -> Option<Node<'tree>> {
-    let query = "(pair key: (property_identifier) @method value: (function_expression))";
+fn find_attribute_in_class<'tree>(class: &ExtClass<'tree>, searched_attribute: &str, bytes: &[u8]) -> Option<Node<'tree>> {
+    let query = "(pair key: (property_identifier) @attribute)";
     let query = Query::new(&js_language(), query).expect("Failed to parse query");
     let mut cursor = QueryCursor::new();
 
-    let mut methods = cursor.matches(&query, class.body.clone(), bytes)
-        .map(|method| {
-            let method_node = method.nodes_for_capture_index(0)
-                .next().expect("Failed to get method capture");
+    let mut attributes = cursor.matches(&query, class.body.clone(), bytes)
+        .map(|attribute| {
+            let attribute_node = attribute.nodes_for_capture_index(0)
+                .next().expect("Failed to get attribute capture");
 
-            let method_name = method_node
-                .utf8_text(bytes).expect("Failed to parse method node content as UTF-8")
+            let attribute_name = attribute_node
+                .utf8_text(bytes).expect("Failed to parse attribute node content as UTF-8")
                 .to_string();
 
-            (method_name, method_node)
+            (attribute_name, attribute_node)
         });
 
-    methods
-        .find(|(method_name, _)| method_name == searched_method)
-        .map(|(_, method_node)| method_node)
+    attributes
+        .find(|(attribute_name, _)| attribute_name == searched_attribute)
+        .map(|(_, attribute_node)| attribute_node)
         .copied()
 }
 
@@ -222,6 +222,51 @@ mod tests {
         TextDocumentIdentifier,
         Url,
     };
+
+    struct TestContext {
+        documents: Vec<(Url, &'static str)>,
+        findable_files: Vec<(Url, &'static str, &'static str)>
+    }
+
+    impl Context for TestContext {
+        fn get_document(&self, url: &Url) -> std::result::Result<Document, String> {
+            self.documents.iter()
+                .find(|(doc_url, _)| doc_url == url)
+                .map(|(doc_url, content)| Document {
+                    url: doc_url.clone(),
+                    text: content.to_string()
+                })
+                .ok_or(format!("Failed to find test document : {}", url))
+        }
+        fn find_file(&self, name: &str) -> std::result::Result<Vec<Document>, String> {
+            Ok(self.findable_files.iter()
+                .filter(|(_, file_name, _)| *file_name == name)
+                .map(|(url, _, content)| Document {
+                    url: url.clone(),
+                    text: content.to_string()
+                })
+                .collect()
+            )
+        }
+    }
+
+    fn url(path: &str) -> Url {
+        let uri = String::from("file://") + path;
+        Url::parse(&uri).unwrap()
+    }
+
+    fn params(uri: &str, position: Position) -> GotoDefinitionParams {
+        GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier {
+                    uri: url(uri)
+                },
+                position
+            },
+            work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
+            partial_result_params: PartialResultParams { partial_result_token: None }
+        }
+    }
 
     #[test]
     fn test_missing_ancester() {
@@ -293,14 +338,13 @@ const MyGrandPa = Ext.extend(com.lyra.Base, {
     }
 
     #[test]
-    fn test_returns_parent_definition() {
+    fn test_returns_parent_attribute() {
 
         let context = TestContext {
             documents: vec![
                 (url("/here/MyClass.js"), "\
 const MyClass = Ext.extend(MyParent, {
     active: false,
-    width: 30,
     test: function() {
       this.width = 20;
       this.enable()
@@ -322,8 +366,8 @@ const MyParent = Ext.extend(com.lyra.Base, {
         };
 
         assert_eq!(
-            Ok(Some(response(url("/parent/MyParent.js"), &Point::new(3, 4)))),
-            goto_definition(params("/here/MyClass.js", Position::new(5, 11)), &context)
+            Ok(Some(response(url("/parent/MyParent.js"), &Point::new(2, 4)))),
+            goto_definition(params("/here/MyClass.js", Position::new(3, 11)), &context)
         );
     }
 
@@ -414,50 +458,5 @@ const MyClass = Ext.extend(MyParent, {
             Ok(None),
             goto_definition(params("/here/MyClass.js", Position::new(8, 6)), &context)
         );
-    }
-
-    struct TestContext {
-        documents: Vec<(Url, &'static str)>,
-        findable_files: Vec<(Url, &'static str, &'static str)>
-    }
-
-    impl Context for TestContext {
-        fn get_document(&self, url: &Url) -> std::result::Result<Document, String> {
-            self.documents.iter()
-                .find(|(doc_url, _)| doc_url == url)
-                .map(|(doc_url, content)| Document {
-                    url: doc_url.clone(),
-                    text: content.to_string()
-                })
-                .ok_or(format!("Failed to find test document : {}", url))
-        }
-        fn find_file(&self, name: &str) -> std::result::Result<Vec<Document>, String> {
-            Ok(self.findable_files.iter()
-                .filter(|(_, file_name, _)| *file_name == name)
-                .map(|(url, _, content)| Document {
-                    url: url.clone(),
-                    text: content.to_string()
-                })
-                .collect()
-            )
-        }
-    }
-
-    fn url(path: &str) -> Url {
-        let uri = String::from("file://") + path;
-        Url::parse(&uri).unwrap()
-    }
-
-    fn params(uri: &str, position: Position) -> GotoDefinitionParams {
-        GotoDefinitionParams {
-            text_document_position_params: TextDocumentPositionParams {
-                text_document: TextDocumentIdentifier {
-                    uri: url(uri)
-                },
-                position
-            },
-            work_done_progress_params: WorkDoneProgressParams { work_done_token: None },
-            partial_result_params: PartialResultParams { partial_result_token: None }
-        }
     }
 }
